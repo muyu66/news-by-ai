@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/go-resty/resty/v2"
 	"github.com/microcosm-cc/bluemonday"
 	log "github.com/sirupsen/logrus"
@@ -8,7 +9,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"strings"
+	"regexp"
 )
 
 func init() {
@@ -30,6 +31,28 @@ func init() {
 }
 
 func main() {
+	client := resty.New()
+
+	const userId int64 = 1
+
+	dsn := "root:123456@tcp(127.0.0.1:3306)/news?charset=utf8mb4&parseTime=True&loc=Local"
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatal("failed to connect to database: %w", err)
+	}
+
+	var user User
+	result := db.Where("id = ?", userId).First(&user)
+	if result.RowsAffected == 0 || len(user.Persona) == 0 {
+		log.Fatal("没有找到用户画像")
+	}
+
+	p := "我的用户画像是：" + user.Persona + "。以我的用户画像为基准，提炼给我可能感兴趣的近两天发生的大事，要求分点，简洁"
+	news := aiReq(client, &p)
+	fmt.Println(news)
+}
+
+func main2() {
 	client := resty.New()
 
 	const userId int64 = 1
@@ -75,9 +98,13 @@ func main() {
 }
 
 func formatText(content string) string {
-	content = strings.ReplaceAll(content, " ", "")
-	content = strings.ReplaceAll(content, "\n", "")
-	content = strings.ReplaceAll(content, "\r", "")
-	content = strings.ReplaceAll(content, " ", "")
-	return content
+	return regexp.MustCompile(`\s+`).ReplaceAllString(content, "")
 }
+
+//func formatText(content string) string {
+//	content = strings.ReplaceAll(content, " ", "")
+//	content = strings.ReplaceAll(content, "\n", "")
+//	content = strings.ReplaceAll(content, "\r", "")
+//	content = strings.ReplaceAll(content, " ", "")
+//	return content
+//}
