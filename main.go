@@ -1,14 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/go-resty/resty/v2"
 	"github.com/microcosm-cc/bluemonday"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	"io"
+	"os"
 	"regexp"
 )
 
@@ -30,42 +30,31 @@ func init() {
 	}
 }
 
-func main() {
+func main2() {
 	client := resty.New()
 
-	const userId int64 = 1
-
-	dsn := "root:123456@tcp(127.0.0.1:3306)/news?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	persona, err := load()
 	if err != nil {
-		log.Fatal("failed to connect to database: %w", err)
+		log.Fatal(err)
 	}
 
-	var user User
-	result := db.Where("id = ?", userId).First(&user)
-	if result.RowsAffected == 0 || len(user.Persona) == 0 {
+	if len(persona) == 0 {
 		log.Fatal("没有找到用户画像")
 	}
 
-	p := "我的用户画像是：" + user.Persona + "。以我的用户画像为基准，提炼给我可能感兴趣的近两天发生的大事，要求分点，简洁"
+	p := "我的用户画像是：" + persona + "。以我的用户画像为基准，提炼给我可能感兴趣的2024年3月22日发生的真实新闻，要求分点，简洁"
 	news := aiReq(client, &p)
 	fmt.Println(news)
 }
 
-func main2() {
+func main() {
 	client := resty.New()
-
-	const userId int64 = 1
-
-	dsn := "root:123456@tcp(127.0.0.1:3306)/news?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatal("failed to connect to database: %w", err)
-	}
 
 	//url := "https://mp.weixin.qq.com/s/RKH4uwmlvI4A4QKBsmsQiQ"
 	//url := "https://mp.weixin.qq.com/s/pvVf7KUpUVCAkFVU1oDRVQ"
-	url := "https://mp.weixin.qq.com/s/vwRW6Y-ID6d7nqPo3srUkA"
+	//url := "https://mp.weixin.qq.com/s/vwRW6Y-ID6d7nqPo3srUkA"
+	//url := "https://mp.weixin.qq.com/s/JmnPO1TR8mUX656P7rt64w"
+	url := "https://top.baidu.com/board?tab=realtime"
 	resp, err := client.R().
 		Get(url)
 	if err != nil {
@@ -78,33 +67,62 @@ func main2() {
 
 	var p string
 
-	var user User
-	result := db.Where("id = ?", userId).First(&user)
-	if result.RowsAffected != 0 || len(user.Persona) > 0 {
-		p = "我之前的画像是：" + user.Persona + "。帮我阅读下面这篇文章，并以此分析我的阅读兴趣画像，且要和上面所说已经有的画像进行合并：" + content
-	} else {
-		p = "帮我阅读下面这篇文章，并以此分析我的阅读兴趣画像：" + content
-	}
+	//persona, err := load()
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	p = "帮我阅读下面这篇文章，并提炼出重点，按点列出来：" + content
+	//if len(persona) > 0 {
+	//	p = "我之前的画像是：" + persona + "。帮我阅读下面这篇文章，并以此分析我的阅读兴趣画像，且要和上面所说已经有的画像进行合并：" + content
+	//} else {
+	//	p = "帮我阅读下面这篇文章，并以此分析我的阅读兴趣画像：" + content
+	//}
+	log.Debug(p)
 
 	newPersona := aiReq(client, &p)
 	newPersona = formatText(newPersona)
 	log.Debug(newPersona)
-	user.Persona = newPersona
-
-	db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"persona"}),
-	}).Create(&user)
+	//
+	//err = save(newPersona)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
 }
 
 func formatText(content string) string {
 	return regexp.MustCompile(`\s+`).ReplaceAllString(content, "")
 }
 
-//func formatText(content string) string {
-//	content = strings.ReplaceAll(content, " ", "")
-//	content = strings.ReplaceAll(content, "\n", "")
-//	content = strings.ReplaceAll(content, "\r", "")
-//	content = strings.ReplaceAll(content, " ", "")
-//	return content
-//}
+func save(content string) error {
+	err := os.WriteFile("persona.data", []byte(content), 644)
+	if err != nil {
+		return errors.New("保存数据异常")
+	}
+	return nil
+}
+
+func load() (string, error) {
+	// 不存在文件
+	_, err := os.Stat("persona.data")
+	if err != nil {
+		return "", nil
+	}
+
+	file, err := os.Open("persona.data")
+	if err != nil {
+		return "", errors.New("加载数据异常")
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Fatal("加载数据异常:", err)
+		}
+	}(file)
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return "", errors.New("加载数据异常")
+	}
+
+	return string(content), nil
+}
